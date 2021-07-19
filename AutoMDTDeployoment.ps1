@@ -225,9 +225,9 @@ else
     New-Item -Path $mdtLogs -ItemType Directory -Force
 
     #Removes Inherit
-    $aclmdtLogs = get-acl $pathmdtLogs
+    $aclmdtLogs = get-acl $mdtLogs
     $aclmdtLogs.SetAccessRuleProtection($true,$true)
-    Set-Acl $mdtLogs $acmdtLogs
+    Set-Acl $mdtLogs $aclmdtLogs
 
     #MDTUser gets modify permissons 
     $aclMDTLogs = Get-Acl $mdtLogs
@@ -240,7 +240,7 @@ else
     $aclmdtCap.SetAccessRuleProtection($true,$true)
     Set-Acl $mdtCap $aclmdtCap
 
-    Sets Modify permission over Captures Folder
+    #Sets Modify permission over Captures Folder
     $aclmdtCap = Get-Acl $mdtCap
     $armdtCap = New-Object System.Security.AccessControl.FileSystemAccessRule("$mdtUser","MODIFY","$inherCnIn,$inherObIn","None","Allow")
     $aclmdtCap.SetAccessRule($armdtCap)
