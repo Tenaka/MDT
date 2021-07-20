@@ -47,18 +47,16 @@ else
     $swSXS = "C:\Media\sxs"
     $swWin10 = "C:\Media\Win10"
 
-    $swPaths = $swADK, $swPE, $swMDT, $swSXS
+    $swPaths = $swADK, $swPE, $swMDT, $swSXS,$swWin10 
 
     foreach ($software in $swPaths)
     {
     $tpSoft = Test-Path $software
     if ($tpSoft -eq $true)
-        {
-        Write-Host "$software is present" -ForegroundColor Green
-        }
+        {Write-Host "$software is present" -ForegroundColor Green}
     else 
-        {
-        Write-Host "$software is missing" -ForegroundColor red
+        {Write-Host "$software is missing" -ForegroundColor red
+        Pause
         }
 
     }
@@ -74,7 +72,7 @@ else
         $dnsAddress = $gNetIPC.dnsserver.serveraddresses
 
     $gNetIPC | Remove-NetIPAddress -Confirm:$false
-    $gNetIPC.IPv4DefaultGateway |Remove-NetRoute -Confirm:$false
+    $gNetIPC.IPv4DefaultGateway |Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 
     $IPAddress = Read-Host "Enter the Static IP for the MDT Server"
     $ScopeID = Read-Host "Enter Scope ID eg 192.168.0.0"
@@ -91,8 +89,8 @@ else
     New-NetIPAddress -InterfaceAlias $gNetAdp.Name `
                      -IPAddress $IPAddress `
                      -AddressFamily IPv4 `
-                     -PrefixLength $gNetIP.PrefixLength `
-                     -DefaultGateway $DefGate 
+                     -PrefixLength 24 `
+                     -DefaultGateway $DefGate
     #Set DNS Server                 
     Set-DnsClientServerAddress -ServerAddresses $dnsServer -InterfaceAlias $intAlias
 
@@ -115,20 +113,19 @@ else
 
     #Set installation path for ADK and MDT
     if ($tpDrv -eq $true)
-        {
-        $installPath = "$drv" +"\Program Files\Windows Kits"
-        }
+        {$installPath = "$drv" +"\Program Files\Windows Kits"}
     else 
-        {
-        $installPath = "C:\Program Files\Windows Kits"
-        }
+        {$installPath = "C:\Program Files\Windows Kits"}
 
     #Install ADK
+    Write-Host "Installing ADK" 
     cmd.exe /c C:\Media\ADK\adksetup.exe /Quiet /InstallPath $installPath /Features OptionId.DeploymentTools OptionID.UserStateMigrationTool OptionId.ImagingAndConfigurationDesigner OptionId.ICDConfigurationDesigner
     #Install ADL PE
+    Write-Host "Installing ADK PE"
     cmd.exe /c C:\Media\ADKPE\adkwinpesetup.exe /features + /q 
 
     #Install MDT
+    Write-Host "Installing MDT"
     cmd.exe /c msiexec.exe /i C:\Media\MDT\MicrosoftDeploymentToolkit_x64.msi /l C:\Media\MDT_Setup.log /q
 
     ############################################################################################
@@ -185,6 +182,13 @@ else
 
     $mdtShRtDes = "MDT Deployment Share"
 
+    #MDT Root grants Svc Read access
+    New-Item -Path $mdtRoot -ItemType directory 
+    New-SmbShare -ReadAccess $mdtuser -Path $mdtRoot -Name $mdtShRoot -Description $mdtShRtDes
+
+    #MDT Root requires Admin modify access to create\update unattend.xml
+    Grant-FileShareAccess -Name $mdtShRoot -AccountName Administrators -AccessRight Modify
+
     #Add MDT Module and create new MDT Root
     Add-PSSnapin Microsoft.BDD.PSSnapin
     New-Item -Path $mdtRoot -ItemType Directory
@@ -192,20 +196,15 @@ else
                 -PSProvider "MDTProvider" `
                 -Root $mdtRoot `
                 -Description 'MDT Deployment Share' `
-                -Networkpath "\\$hostn\$mdtShRoot" |
-                    Add-MDTPersistentDrive New-SmbShare $mdtShare 
+                -Networkpath "\\$hostn\$mdtShRoot" | Add-MDTPersistentDrive
 
-    #MDT Root grants Svc Read access 
-    New-SmbShare -ReadAccess $mdtuser -Path $mdtRoot -Name $mdtShRoot -Description $mdtShRtDes
-
-    #MDT Root requires Admin modify access to create\update unattend.xml
-    Grant-FileShareAccess -Name $mdtShRoot -AccountName Administrators -AccessRight Modify
 
     #Logging Share grants svc Modify access
-    New-SmbShare -ChangeAccess $mdtUser -Path $mdtLogs -Name $mdtShLogs -Description "Logs Share"
+    New-Item -Path $mdtLogs -ItemType directory 
+    New-SmbShare -Path $mdtLogs -Name $mdtShLogs -Description "Logs Share" -ChangeAccess $mdtUser
 
     #Capture share grants svc Modify access to upload deployed captures
-    New-SmbShare -ChangeAccess $mdtUser -Path $mdtCap -Name $mdtShCap -Description "Capture Share"
+    New-SmbShare -Path $mdtCap -Name $mdtShCap -Description "Capture Share" -ChangeAccess $mdtUser
 
     #Inheritence 
     $inherNone = [System.Security.AccessControl.InheritanceFlags]::None
@@ -251,40 +250,14 @@ else
     ############################################################################################
 
     #Enable MDT Monitoring
-    Enable-MDTMonitorService -DataPort 9801 -EventPort 
+    Enable-MDTMonitorService -DataPort 9801 -EventPort 9800
 
     #Import MDT Powershell Module
-    Import-Module "$installPath" + "\bin\MicrosoftDeploymentToolkit.psd1"
+    Import-Module "C:\Program Files\Microsoft Deployment Toolkit\Bin\MicrosoftDeploymentToolkit.psd1"
 
     #Win10-PE Profiles created
-    New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root $mdtRoot
-    New-Item -path "DS001:\Selection Profiles" -enable "True" -Name "Win10PE_Drivers" -Comments "Only add Network and Storage drivers to this profile" -Definition "<SelectionProfile />" -ReadOnly "False" -Verbose
-
-    #Update Settings.xml to set x64 boot media settings
-    $gcSettings = Get-Content $mdtRoot\Control\Settings.xml 
-    $gcSettings.Replace("<Boot.x64.ScratchSpace>32</Boot.x64.ScratchSpace>","<Boot.x64.ScratchSpace>512</Boot.x64.ScratchSpace>") | 
-    Out-File $mdtRoot\Control\Settings.xml
-    $gcSettings.Replace("<Boot.x64.ScratchSpace>32</Boot.x64.ScratchSpace>","<Boot.x64.GenerateGenericWIM>True</Boot.x64.GenerateGenericWIM>") | 
-    Out-File $mdtRoot\Control\Settings.xml
-    $gcSettings.Replace("<Boot.x64.SelectionProfile>All Drivers and Packages</Boot.x64.SelectionProfile>","<Boot.x64.SelectionProfile>Win10PE_Drivers</Boot.x64.SelectionProfile>") | 
-    Out-File $mdtRoot\Control\Settings.xml
-    $gcSettings.Replace("<Boot.x64.GenerateGenericWIM>False</Boot.x64.GenerateGenericWIM>","<Boot.x64.GenerateGenericWIM>True</Boot.x64.GenerateGenericWIM>") | 
-    Out-File $mdtRoot\Control\Settings.xml
-
-    ############################################################################################
-    ########################  CREATE BOOT MEDIA, IMPORT AND INIT WDS  ##########################
-    ############################################################################################
-
-    #Generate boot media
-    New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root "$mdtRoot"
-    update-MDTDeploymentShare -path "DS001:" -Force -Verbose
-
-    #init WDS
-    & wdsutil.exe /Initialize-Server /Server:$hostn /reminst:"$remDir`:\RemoteInstall" /standalone
-
-    #Import WDS Boot image generated by MDT
-    Import-WdsBootImage -NewImageName "Lite Touch Windows PE (x64)" -NewFileName "LiteTouchPE_x64.wim" -Path $mdtRoot\boot\LiteTouchPE_x64.wim 
-
+    New-PSDrive -Name "DS002" -PSProvider MDTProvider -Root $mdtRoot
+    New-Item -path "DS002:\Selection Profiles" -enable "True" -Name "Win10PE_Drivers" -Comments "Only add Network and Storage drivers to this profile" -Definition "<SelectionProfile />" -ReadOnly "False" -Verbose
 
     ############################################################################################
     ############################  IMPORT WINDOWS 10 MEDIA  #####################################
@@ -296,14 +269,14 @@ else
     $psISO = (psdrive | where {$_.Free -eq "0"}).Name
 
     #New Folder for Windows 10 Images
-    New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root "$mdtRoot"
-    New-Item -path "DS001:\Operating Systems" -enable "True" -Name "Windows 10" -Comments "" -ItemType "folder" -Verbose
+    #New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root "$mdtRoot"
+    New-Item -path "DS002:\Operating Systems" -enable "True" -Name "Windows 10" -Comments "" -ItemType "folder" -Verbose
 
     #Import Windows 10 into MDT
-    Import-MDTOperatingSystem -path "DS001:\Operating Systems\Windows 10" -SourceFile "$psISO`:\sources\install.wim" -DestinationFolder "Windows 10" -Verbose
+    Import-MDTOperatingSystem -path "DS002:\Operating Systems\Windows 10" -SourceFile "$psISO`:\sources\install.wim" -DestinationFolder "Windows 10" -Verbose
 
     #New Folder for Gold Image Task Sequences
-    New-Item -path "DS001:\Task Sequences" -enable "True" -Name "Windows 10 Gold Image" -Comments "" -ItemType "folder" -Verbose
+    New-Item -path "DS002:\Task Sequences" -enable "True" -Name "Windows 10 Gold Image" -Comments "" -ItemType "folder" -Verbose
 
     #List avaiable Windows 10 versions in wim file - Select Pro or Enterprise 
     $gcOSImage = (Get-Content "$mdtRoot\Control\OperatingSystems.xml" -Delimiter / | Select-String "<ImageName>")-replace("</","")-replace("ImageIndex><ImageName>","")
@@ -313,15 +286,13 @@ else
     if ($gcOSImage -match "Windows 10 Enterprise" )
         { 
         #New Task Sequence for Windows 10 Enterprise
-        Import-MDTTaskSequence -path "DS001:\Task Sequences\Windows 10 Gold Image" -Name "Windows 10 Enterprise Gold Image" -Template "Client.xml" -Comments "" -ID $tsID -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10\Windows 10 Enterprise in Windows 10 install.wim" -FullName "Windows User" -OrgName "Contoso" -HomePage "about:blank" -Verbose
+        Import-MDTTaskSequence -path "DS002:\Task Sequences\Windows 10 Gold Image" -Name "Windows 10 Enterprise Gold Image" -Template "Client.xml" -Comments "" -ID $tsID -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10\Windows 10 Enterprise in Windows 10 install.wim" -FullName "Windows User" -OrgName "Contoso" -HomePage "about:blank" -Verbose
         }
     else
         { 
         #New Task Sequence for Windows 10 Pro
-        Import-MDTTaskSequence -path "DS001:\Task Sequences\Windows 10 Gold Image" -Name "Windows 10 Pro Gold Image" -Template "Client.xml" -Comments "" -ID $tsID -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10\Windows 10 Pro in Windows 10 install.wim" -FullName "Windows User" -OrgName "Contoso" -HomePage "about:blank" -Verbose
+        Import-MDTTaskSequence -path "DS002:\Task Sequences\Windows 10 Gold Image" -Name "Windows 10 Pro Gold Image" -Template "Client.xml" -Comments "" -ID $tsID -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10\Windows 10 Pro in Windows 10 install.wim" -FullName "Windows User" -OrgName "Contoso" -HomePage "about:blank" -Verbose
         }
-
-    $remDir = $mdtRoot.Split(":")[0]
 
     ############################################################################################
     #########################  SET CUSTOMSETTINGS AND BOOTSTRAP  ###############################
@@ -445,6 +416,75 @@ else
     Add-Content -Path $bootStrap -Value "UserDomain=contoso.net"
     Add-Content -Path $bootStrap -Value "UserID=$mdtUser"
     Add-Content -Path $bootStrap -Value "UserPassword=$svcPass"
+
+    ############################################################################################
+    ############################  SET BOOT MEDIA SETTINGS ######################################
+    ############################################################################################
+    
+   $mdtSetSrc = "C:\Program Files\Microsoft Deployment Toolkit\Templates\"
+   Copy-Item $mdtSetSrc\Settings.xml $mdtSetSrc\Settings-backup.xml -Force
+
+   #UPDATE TEMPLATE SOURCE - Update template source Settings.xml or MDTRoot\Control\Settings.xml will revert 
+
+    #Update Settings.xml to set x64 boot media settings
+    $gcSettings = Get-Content $mdtSetSrc\Settings.xml 
+    $gcSettings.Replace('Boot.x64.ScratchSpace>32</Boot.x64.ScratchSpace','Boot.x64.ScratchSpace>512</Boot.x64.ScratchSpace') | 
+    Out-File $mdtSetSrc\Settings.xml -Force
+
+    $gcSettings = Get-Content $mdtSetSrc\Settings.xml 
+    $gcSettings.Replace('Boot.x64.GenerateGenericWIM>False</Boot.x64.GenerateGenericWIM','Boot.x64.GenerateGenericWIM>True</Boot.x64.GenerateGenericWIM') | 
+    Out-File $mdtSetSrc\Settings.xml -Force
+
+    $gcSettings = Get-Content $mdtSetSrc\Settings.xml 
+    $gcSettings.Replace('Boot.x64.SelectionProfile>All Drivers and Packages</Boot.x64.SelectionProfile','Boot.x64.SelectionProfile>Win10PE_Drivers</Boot.x64.SelectionProfile') | 
+    Out-File $mdtSetSrc\Settings.xml -Force
+
+    #Get-Content $mdtSetSrc\Settings.xml  | Select-String "Boot.x64.SelectionProfile>All Drivers and Packages</Boot.x64.SelectionProfile"
+
+    $gcSettings = Get-Content $mdtSetSrc\Settings.xml 
+    $gcSettings.Replace('Boot.x64.GenerateGenericWIM>False</Boot.x64.GenerateGenericWIM','Boot.x64.GenerateGenericWIM>True</Boot.x64.GenerateGenericWIM') | 
+    Out-File $mdtSetSrc\Settings.xml -Force
+
+    #UPDATE SETTINGS.XML - Update settings.xml referenced during deployment, cant wait for previous update to be processed and will now revert with correct settings.
+ 
+    Copy-Item $mdtRoot\Control\Settings.xml $mdtRoot\Control\Settings-backup.xml -Force
+
+    #Update Settings.xml to set x64 boot media settings
+    $gcSettings = Get-Content $mdtRoot\Control\Settings.xml 
+    $gcSettings.Replace('Boot.x64.ScratchSpace>128</Boot.x64.ScratchSpace','Boot.x64.ScratchSpace>512</Boot.x64.ScratchSpace') | 
+    Out-File $mdtRoot\Control\Settings.xml -Force
+
+    $gcSettings = Get-Content $mdtRoot\Control\Settings.xml
+    $gcSettings.Replace('Boot.x64.GenerateGenericWIM>False</Boot.x64.GenerateGenericWIM','Boot.x64.GenerateGenericWIM>True</Boot.x64.GenerateGenericWIM') | 
+    Out-File $mdtRoot\Control\Settings.xml -Force
+
+    $gcSettings = Get-Content $mdtRoot\Control\Settings.xml
+    $gcSettings.Replace('Boot.x64.SelectionProfile>All Drivers and Packages</Boot.x64.SelectionProfile','Boot.x64.SelectionProfile>Win10PE_Drivers</Boot.x64.SelectionProfile') | 
+    Out-File $mdtRoot\Control\Settings.xml -Force
+
+    $gcSettings = Get-Content $mdtRoot\Control\Settings.xml
+    $gcSettings.Replace('Boot.x64.GenerateGenericWIM>False</Boot.x64.GenerateGenericWIM','Boot.x64.GenerateGenericWIM>True</Boot.x64.GenerateGenericWIM') | 
+    Out-File $mdtRoot\Control\Settings.xml -Force
+
+    ############################################################################################
+    ########################  CREATE BOOT MEDIA, IMPORT AND INIT WDS  ##########################
+    ############################################################################################
+
+    #Generate boot media
+    #New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root "$mdtRoot"
+    Update-MDTDeploymentShare -path "DS002:" -Force -Verbose
+
+    #init WDS
+    sleep 5
+    $remDir = $mdtRoot.Split(":")[0]
+    $wdsDrv = "$remDir`:\RemoteInstall"
+    cmd.exe /c wdsutil.exe /Initialize-Server /Server:$hostn /reminst:$wdsDrv /standalone
+
+    sleep 5
+    Start-Service WDSServer
+
+    #Import WDS Boot image generated by MDT
+    Import-WdsBootImage -NewImageName "Lite Touch Windows PE (x64)" -NewFileName "LiteTouchPE_x64.wim" -Path $mdtRoot\boot\LiteTouchPE_x64.wim 
 
     ############################################################################################
     ######################################  THE END  ###########################################
