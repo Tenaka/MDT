@@ -159,7 +159,7 @@ else
     $mdtUser = "MDTUser"
     $pwl = 14
     $sysWeb = Add-Type -AssemblyName system.web
-    $randPass = [System.Web.Security.Membership]::GeneratePassword($pwl,3)
+    $randPass = [System.Web.Security.Membership]::GeneratePassword($pwl,0)
 
     $svcPass = ConvertTo-SecureString $randPass -AsPlainText -Force 
 
@@ -191,7 +191,6 @@ else
 
     #Add MDT Module and create new MDT Root
     Add-PSSnapin Microsoft.BDD.PSSnapin
-    New-Item -Path $mdtRoot -ItemType Directory
     New-PSDrive -Name 'DS001' `
                 -PSProvider "MDTProvider" `
                 -Root $mdtRoot `
@@ -330,7 +329,7 @@ else
     Add-Content -Path $cuSet -Value 'OSDComputerName=DT#right("%SerialNumber%",10)#'
     Add-Content -Path $cuSet -Value " "
     Add-Content -Path $cuSet -Value "[DefaultGateway]"
-    Add-Content -Path $cuSet -Value "$DHCPRouter=UK"
+    Add-Content -Path $cuSet -Value "$DefGate=UK"
     Add-Content -Path $cuSet -Value "192.168.1.1=USA"
     Add-Content -Path $cuSet -Value " "
     Add-Content -Path $cuSet -Value "[UK]"
@@ -401,7 +400,7 @@ else
     Add-Content -Path $cuSet -Value "'//UserID=Domain\$mdtUser"
     Add-Content -Path $cuSet -Value " "
     Add-Content -Path $cuSet -Value "UserID=$mdtUser"
-    Add-Content -Path $cuSet -Value "UserPassword=$svcPass"
+    Add-Content -Path $cuSet -Value "UserPassword=$randPass"
     Add-Content -Path $cuSet -Value " " 
     Add-Content -Path $cuSet -Value "'//MDT Monitoring and Update Server"
     Add-Content -Path $cuSet -Value "EventService=http://$IPAddress:9800"
@@ -411,11 +410,15 @@ else
     #Update BootStrap.ini
     $bootStrap = "$mdtRoot\Control\Bootstrap.ini"
 
-    Set-Content -Path $bootStrap -Value "SkipBDDWelcome=YES"
+    Set-Content -Path $bootStrap -Value "[Settings]"
+    Add-Content -Path $bootStrap -Value "Priority=Default"
+    Add-Content -Path $bootStrap -Value " "
+    Add-Content -Path $bootStrap -Value "[Default]"
+    Add-Content -Path $bootStrap -Value "SkipBDDWelcome=YES"
     Add-Content -Path $bootStrap -Value "DeployRoot=\\$IPAddress\$mdtShRoot"
-    Add-Content -Path $bootStrap -Value "UserDomain=contoso.net"
+    Add-Content -Path $bootStrap -Value "UserDomain=."
     Add-Content -Path $bootStrap -Value "UserID=$mdtUser"
-    Add-Content -Path $bootStrap -Value "UserPassword=$svcPass"
+    Add-Content -Path $bootStrap -Value "UserPassword=$randPass"
 
     ############################################################################################
     ############################  SET BOOT MEDIA SETTINGS ######################################
@@ -451,7 +454,7 @@ else
 
     #Update Settings.xml to set x64 boot media settings
     $gcSettings = Get-Content $mdtRoot\Control\Settings.xml 
-    $gcSettings.Replace('Boot.x64.ScratchSpace>128</Boot.x64.ScratchSpace','Boot.x64.ScratchSpace>512</Boot.x64.ScratchSpace') | 
+    $gcSettings.Replace('Boot.x64.ScratchSpace>32</Boot.x64.ScratchSpace','Boot.x64.ScratchSpace>512</Boot.x64.ScratchSpace') | 
     Out-File $mdtRoot\Control\Settings.xml -Force
 
     $gcSettings = Get-Content $mdtRoot\Control\Settings.xml
