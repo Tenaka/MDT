@@ -10,10 +10,10 @@ Server Spec:
 VM or Physical Server
     C:\ 60Gb min
     D:\ 60Gb 
-    2048Gb RAM
+    2048Mb RAM, 4096 is prefered
     2 * Cores
 
-Windows Server 2019 (May work on 2012 and 2016, depends on WDS Powershell support)
+Windows Server 2019
 
 Media Required copying to the the following locations:
     ADK                              saved to C:\Media\ADK
@@ -58,6 +58,7 @@ else
         {Write-Host "$software is missing" -ForegroundColor red
         Pause
         }
+
     }
 
     $hostn = Hostname
@@ -73,24 +74,22 @@ else
     $gNetIPC | Remove-NetIPAddress -Confirm:$false
     $gNetIPC.IPv4DefaultGateway |Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 
-    Write-Host "Server IP details" -ForegroundColor Green
     $IPAddress = Read-Host "Enter the Static IP for the MDT Server"
-    $DefGate = Read-Host "Enter the Default Gateway eg 192.168.0.254"
-    $dnsServer = Read-Host "Enter DNS IP(s) eg 192.168.0.22 or 192.168.0.22,192.168.0.23"
-    $dnsName = Read-Host "Enter an FQDN eg Contoso.net"
-
-    Write-Host "DHCP Scope details" -ForegroundColor Green
     $ScopeID = Read-Host "Enter Scope ID eg 192.168.0.0"
     $scopeName = "MDT Client Deployment Scope"
     $DHCPStart = Read-Host "Enter the start of a DHCP IP range eg 192.168.0.1"
     $DHCPEnd = Read-Host "Enter the end of the DHCP IP range eg 192.168.0.100"
     $DHCPSub = Read-Host "Enter the Subnet eg 255.255.255.0"
+    $DefGate = Read-Host "Enter the Default Gateway eg 192.168.0.254"
+    $dnsServer = Read-Host "Enter DNS IP(s) eg 192.168.0.22 or 192.168.0.22,192.168.0.23"
+    $dnsName = Read-Host "Enter an FQDN eg Contoso.net"
+
     
     #Set Static IP
     New-NetIPAddress -InterfaceAlias $gNetAdp.Name `
                      -IPAddress $IPAddress `
-                     -AddressFamily IPv4 `  #assumes IPV4
-                     -PrefixLength 24 `     #assumes 255.255.255.0
+                     -AddressFamily IPv4 `
+                     -PrefixLength 24 `
                      -DefaultGateway $DefGate
     #Set DNS Server                 
     Set-DnsClientServerAddress -ServerAddresses $dnsServer -InterfaceAlias $intAlias
@@ -100,11 +99,9 @@ else
     ############################################################################################
 
     #Install DHCP and WDS Features
-    Write-Host "Installing WDS and DHCP" -ForegroundColor Green
     Install-WindowsFeature -Name DHCP,RSAT-DHCP,WDS,WDS-AdminPack
 
     #Install .Net Framework - required for SQL Databased
-    Write-Host "Installing .Net Framework" -ForegroundColor Green   
     Install-WindowsFeature -Name NET-Framework-Core -Source C:\media\sxs
 
     #Identify data drive 
@@ -121,14 +118,14 @@ else
         {$installPath = "C:\Program Files\Windows Kits"}
 
     #Install ADK
-    Write-Host "Installing ADK"  -ForegroundColor Green 
+    Write-Host "Installing ADK" 
     cmd.exe /c C:\Media\ADK\adksetup.exe /Quiet /InstallPath $installPath /Features OptionId.DeploymentTools OptionID.UserStateMigrationTool OptionId.ImagingAndConfigurationDesigner OptionId.ICDConfigurationDesigner
     #Install ADL PE
-    Write-Host "Installing ADK PE" -ForegroundColor Green 
+    Write-Host "Installing ADK PE"
     cmd.exe /c C:\Media\ADKPE\adkwinpesetup.exe /features + /q 
 
     #Install MDT
-    Write-Host "Installing MDT" -ForegroundColor Green 
+    Write-Host "Installing MDT"
     cmd.exe /c msiexec.exe /i C:\Media\MDT\MicrosoftDeploymentToolkit_x64.msi /l C:\Media\MDT_Setup.log /q
 
     ############################################################################################
@@ -136,7 +133,6 @@ else
     ############################################################################################
 
     #Creates DHCP Scope
-    Write-Host "Adding DHCP Scope" -ForegroundColor Green
     Add-DhcpServerv4Scope -ComputerName $hostn `
                           -Name $scopeName `
                           -StartRange $DHCPStart `
@@ -160,11 +156,10 @@ else
     ############################################################################################
 
     #Generate Random Password for MDTUser Service Account
-    Write-Host "Creating MDT Server Account" -ForegroundColor Green
     $mdtUser = "MDTUser"
-    $pwl = 16
+    $pwl = 14
     $sysWeb = Add-Type -AssemblyName system.web
-    $randPass = [System.Web.Security.Membership]::GeneratePassword($pwl,3)
+    $randPass = [System.Web.Security.Membership]::GeneratePassword($pwl,0)
 
     $svcPass = ConvertTo-SecureString $randPass -AsPlainText -Force 
 
@@ -175,10 +170,8 @@ else
                      -AccountNeverExpires `
                      -PasswordNeverExpires
 
-    
     #Paths and Shares
-    Write-Host "Creating MDT Share" -ForegroundColor Green
-    if($drv -eq ":"){$drv = "C:"}
+    if($drv -eq ":"){$drv = "c:"}
     $mdtRoot = "$drv"+"\MDTDeploymentShare"
     $mdtLogs = "$mdtRoot\logs"
     $mdtCap = "$mdtRoot\captures"
@@ -204,7 +197,6 @@ else
                 -Root $mdtRoot `
                 -Description 'MDT Deployment Share' `
                 -Networkpath "\\$hostn\$mdtShRoot" | Add-MDTPersistentDrive
-
 
     #Logging Share grants svc Modify access
     New-Item -Path $mdtLogs -ItemType directory 
@@ -255,12 +247,12 @@ else
     ############################################################################################
     ################################  CONFIG MDT SETTINGS  #####################################
     ############################################################################################
-
-    #Enable MDT Monitoring
-    Enable-MDTMonitorService -DataPort 9801 -EventPort 9800
-
+    
     #Import MDT Powershell Module
     Import-Module "C:\Program Files\Microsoft Deployment Toolkit\Bin\MicrosoftDeploymentToolkit.psd1"
+
+    #Enable MDT Monitoring
+    Enable-MDTMonitorService -EventPort 9800 -DataPort 9801 
 
     #Win10-PE Profiles created
     New-PSDrive -Name "DS002" -PSProvider MDTProvider -Root $mdtRoot
@@ -271,7 +263,6 @@ else
     ############################################################################################
 
     #Mount Windows ISO 
-     Write-Host "Importing Windows 10 Media" -ForegroundColor Green
     Mount-DiskImage -ImagePath (Get-ChildItem C:\Media\Win10 -Filter *.iso).FullName
 
     $psISO = (psdrive | where {$_.Free -eq "0"}).Name[0]
@@ -307,7 +298,6 @@ else
     ############################################################################################
 
     #Set custom settings 
-    Write-Host "Updating CustomSettings and Bootstrap" -ForegroundColor Green
     $cuSet = "$mdtRoot\Control\CustomSettings.ini"
 
     Set-Content -Path $cuSet -Value "[Settings]"
@@ -434,11 +424,10 @@ else
     ############################  SET BOOT MEDIA SETTINGS ######################################
     ############################################################################################
     
-     Write-Host "Setting boot media options" -ForegroundColor Green
-    $mdtSetSrc = "C:\Program Files\Microsoft Deployment Toolkit\Templates\"
-    Copy-Item $mdtSetSrc\Settings.xml $mdtSetSrc\Settings-backup.xml -Force
+   $mdtSetSrc = "C:\Program Files\Microsoft Deployment Toolkit\Templates\"
+   Copy-Item $mdtSetSrc\Settings.xml $mdtSetSrc\Settings-backup.xml -Force
 
-    #UPDATE TEMPLATE SOURCE - Update template source Settings.xml or MDTRoot\Control\Settings.xml will revert 
+   #UPDATE TEMPLATE SOURCE - Update template source Settings.xml or MDTRoot\Control\Settings.xml will revert 
 
     #Update Settings.xml to set x64 boot media settings
     $gcSettings = Get-Content $mdtSetSrc\Settings.xml 
@@ -453,10 +442,13 @@ else
     $gcSettings.Replace('Boot.x64.SelectionProfile>All Drivers and Packages</Boot.x64.SelectionProfile','Boot.x64.SelectionProfile>Win10PE_Drivers</Boot.x64.SelectionProfile') | 
     Out-File $mdtSetSrc\Settings.xml -Force
 
-    #Get-Content $mdtSetSrc\Settings.xml  | Select-String "Boot.x64.SelectionProfile>All Drivers and Packages</Boot.x64.SelectionProfile"
-
     $gcSettings = Get-Content $mdtSetSrc\Settings.xml 
     $gcSettings.Replace('Boot.x64.GenerateGenericWIM>False</Boot.x64.GenerateGenericWIM','Boot.x64.GenerateGenericWIM>True</Boot.x64.GenerateGenericWIM') | 
+    Out-File $mdtSetSrc\Settings.xml -Force
+
+    #Enable monitoring as the enable-MDTMonitoing command does not work everytime
+    $gcSettings = Get-Content $mdtSetSrc\Settings.xml 
+    $gcSettings.Replace('<MonitorHost>',"`<MonitorHost>$hostn") | 
     Out-File $mdtSetSrc\Settings.xml -Force
 
     #UPDATE SETTINGS.XML - Update settings.xml referenced during deployment, cant wait for previous update to be processed and will now revert with correct settings.
@@ -480,13 +472,17 @@ else
     $gcSettings.Replace('Boot.x64.GenerateGenericWIM>False</Boot.x64.GenerateGenericWIM','Boot.x64.GenerateGenericWIM>True</Boot.x64.GenerateGenericWIM') | 
     Out-File $mdtRoot\Control\Settings.xml -Force
 
+    #Enable monitoring as the enable-MDTMonitoing command does not work everytime
+    $gcSettings = Get-Content $mdtRoot\Control\Settings.xml
+    $gcSettings.Replace('<MonitorHost>',"`<MonitorHost>$hostn") | 
+    Out-File $mdtRoot\Control\Settings.xml -Force
+
     ############################################################################################
     ########################  CREATE BOOT MEDIA, IMPORT AND INIT WDS  ##########################
     ############################################################################################
 
     #Generate boot media
     #New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root "$mdtRoot"
-     Write-Host "Generating boot media" -ForegroundColor Green
     Update-MDTDeploymentShare -path "DS002:" -Force -Verbose
 
     #init WDS
@@ -501,7 +497,6 @@ else
     #Import WDS Boot image generated by MDT
     Import-WdsBootImage -NewImageName "Lite Touch Windows PE (x64)" -NewFileName "LiteTouchPE_x64.wim" -Path $mdtRoot\boot\LiteTouchPE_x64.wim 
 
-    Write-Host "All done" -ForegroundColor Green
     ############################################################################################
     ######################################  THE END  ###########################################
     ############################################################################################
