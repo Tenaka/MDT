@@ -274,7 +274,7 @@ else
      Write-Host "Importing Windows 10 Media" -ForegroundColor Green
     Mount-DiskImage -ImagePath (Get-ChildItem C:\Media\Win10 -Filter *.iso).FullName
 
-    $psISO = (psdrive | where {$_.Free -eq "0"}).Name
+    $psISO = (psdrive | where {$_.Free -eq "0"}).Name[0]
 
     #New Folder for Windows 10 Images
     #New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root "$mdtRoot"
