@@ -529,7 +529,7 @@ else
     Import-WdsBootImage -NewImageName "Lite Touch Windows PE (x64)" -NewFileName "LiteTouchPE_x64.wim" -Path $mdtRoot\boot\LiteTouchPE_x64.wim 
 
     Write-Host "" -ForegroundColor Green
-    Write-Host "Add addtional drivers as a selection profile, update Boot media and add to Task Sequence - if there is not native support for Windows 10" -ForegroundColor Red
+    Write-Host "Add addtional drivers and add to a selection profile, update Boot media and add to Task Sequence - if there is not native support for Windows 10" -ForegroundColor Red
     Write-Host "" -ForegroundColor Green
     Write-Host "" -ForegroundColor Green
     Write-Host "FINISHED" -ForegroundColor Green
