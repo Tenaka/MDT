@@ -4,6 +4,8 @@
 
 Automate the installation and configuration of MDT, ADK, DHCP and WDS to allow PXE and deployment of OEM Windows 10.
 
+For support visit https://www.tenaka.net/mdt-scripted-install
+
 .DESCRIPTION
 
 Server Spec:
@@ -28,6 +30,9 @@ https://docs.microsoft.com/en-us/windows-hardware/get-started/adk-install
 MDT 
 https://www.microsoft.com/en-us/download/details.aspx?id=54259
 
+There are limitations with drivers in its current configuration, if Windows 10 doesn't naively support
+the network adapter and mass storage devices, the deployment will fail. Follow MDT part 6 to resolve any driver issues.
+
 
 .VERSION
 210716.01 - created 
@@ -36,7 +41,7 @@ https://www.microsoft.com/en-us/download/details.aspx?id=54259
 #>
 
 if (-not([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
-{Write-Host "An elevated administrator account is required to run this script." -BackgroundColor Red}
+{Write-Host "An elevated administrator account is required to run this script." -ForegroundColor Red}
 
 else
 {
@@ -49,6 +54,8 @@ else
 
     $swPaths = $swADK, $swPE, $swMDT, $swSXS,$swWin10 
 
+    Write-Host "" -ForegroundColor Green
+
     foreach ($software in $swPaths)
     {
     $tpSoft = Test-Path $software
@@ -58,11 +65,11 @@ else
         {Write-Host "$software is missing" -ForegroundColor red
         Pause
         }
-
     }
-
+    #Hostname
     $hostn = Hostname
 
+    #get the current network information
     $gNetAdp = Get-NetAdapter | where {$_.Status -eq "up"}
         $intAlias = $gNetAdp.InterfaceAlias
 
@@ -70,22 +77,31 @@ else
         $IPAddress = $gNetIPC.IPv4Address.ipaddress
         $DHCPRouter = $gNetIPC.IPv4DefaultGateway.nexthop
         $dnsAddress = $gNetIPC.dnsserver.serveraddresses
+    
 
     $gNetIPC | Remove-NetIPAddress -Confirm:$false
     $gNetIPC.IPv4DefaultGateway |Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 
+    #get static IP information
+    Write-Host "Details for setting static IP for MDT Server" -ForegroundColor Green
     $IPAddress = Read-Host "Enter the Static IP for the MDT Server"
+    $DefGate = Read-Host "Enter the Default Gateway eg 192.168.0.254"
+    $dnsServer = Read-Host "Enter DNS IP(s) eg 192.168.0.22 or 192.168.0.22,192.168.0.23"
+    Write-Host " "
+    
+    #Set DHCP Options
+    Write-Host "Details for setting DHCP Scope and Options" -ForegroundColor Green
     $ScopeID = Read-Host "Enter Scope ID eg 192.168.0.0"
     $scopeName = "MDT Client Deployment Scope"
     $DHCPStart = Read-Host "Enter the start of a DHCP IP range eg 192.168.0.1"
     $DHCPEnd = Read-Host "Enter the end of the DHCP IP range eg 192.168.0.100"
-    $DHCPSub = Read-Host "Enter the Subnet eg 255.255.255.0"
+    $DHCPSub = "255.255.255.0"
     $DefGate = Read-Host "Enter the Default Gateway eg 192.168.0.254"
     $dnsServer = Read-Host "Enter DNS IP(s) eg 192.168.0.22 or 192.168.0.22,192.168.0.23"
     $dnsName = Read-Host "Enter an FQDN eg Contoso.net"
 
-    
     #Set Static IP
+    Write-Host "Setting static IP" -ForegroundColor Green
     New-NetIPAddress -InterfaceAlias $gNetAdp.Name `
                      -IPAddress $IPAddress `
                      -AddressFamily IPv4 `
@@ -99,13 +115,15 @@ else
     ############################################################################################
 
     #Install DHCP and WDS Features
+    Write-Host "Installing Windows Features WDS and DHCP" -ForegroundColor Green
     Install-WindowsFeature -Name DHCP,RSAT-DHCP,WDS,WDS-AdminPack
 
     #Install .Net Framework - required for SQL Databased
+    Write-Host "Installing .Net for SQL if required later" -ForegroundColor Green
     Install-WindowsFeature -Name NET-Framework-Core -Source C:\media\sxs
 
-    #Identify data drive 
-    $psDataDrv = psdrive | where {$_.Provider -like "*File*" -and $_.name -ne "C" -and $_.Free -ne "0" -and $_.Free -ne $null}
+    #Identify data drive and select the first listed
+    $psDataDrv = psdrive | where {$_.Provider -like "*File*" -and $_.name -ne "C" -and $_.Free -ne "0" -and $_.Free -ne $null}[0]
 
     #Set Data Drive Letter as variable
     $drv = ($psDataDrv).Name + ":"
@@ -118,14 +136,15 @@ else
         {$installPath = "C:\Program Files\Windows Kits"}
 
     #Install ADK
-    Write-Host "Installing ADK" 
+    Write-Host "Installing ADK" -ForegroundColor Green
     cmd.exe /c C:\Media\ADK\adksetup.exe /Quiet /InstallPath $installPath /Features OptionId.DeploymentTools OptionID.UserStateMigrationTool OptionId.ImagingAndConfigurationDesigner OptionId.ICDConfigurationDesigner
+    
     #Install ADL PE
-    Write-Host "Installing ADK PE"
+    Write-Host "Installing ADK PE" -ForegroundColor Green
     cmd.exe /c C:\Media\ADKPE\adkwinpesetup.exe /features + /q 
 
     #Install MDT
-    Write-Host "Installing MDT"
+    Write-Host "Installing MDT" -ForegroundColor Green
     cmd.exe /c msiexec.exe /i C:\Media\MDT\MicrosoftDeploymentToolkit_x64.msi /l C:\Media\MDT_Setup.log /q
 
     ############################################################################################
@@ -133,6 +152,7 @@ else
     ############################################################################################
 
     #Creates DHCP Scope
+    Write-Host "Adding DHCP Scope and Options" -ForegroundColor Green
     Add-DhcpServerv4Scope -ComputerName $hostn `
                           -Name $scopeName `
                           -StartRange $DHCPStart `
@@ -156,10 +176,12 @@ else
     ############################################################################################
 
     #Generate Random Password for MDTUser Service Account
+    Write-Host "Creates MDT User with complex password" -ForegroundColor Green
     $mdtUser = "MDTUser"
     $pwl = 14
     $sysWeb = Add-Type -AssemblyName system.web
-    $randPass = [System.Web.Security.Membership]::GeneratePassword($pwl,0)
+    #ranPass is the clear text password - used in customsettings and bootstrat
+    $randPass = [System.Web.Security.Membership]::GeneratePassword($pwl,3)
 
     $svcPass = ConvertTo-SecureString $randPass -AsPlainText -Force 
 
@@ -171,6 +193,7 @@ else
                      -PasswordNeverExpires
 
     #Paths and Shares
+    Write-Host "Creates MDT Shares" -ForegroundColor Green
     if($drv -eq ":"){$drv = "c:"}
     $mdtRoot = "$drv"+"\MDTDeploymentShare"
     $mdtLogs = "$mdtRoot\logs"
@@ -205,6 +228,7 @@ else
     #Capture share grants svc Modify access to upload deployed captures
     New-SmbShare -Path $mdtCap -Name $mdtShCap -Description "Capture Share" -ChangeAccess $mdtUser
 
+    Write-Host "Sets MDT Share NTFS Permissions" -ForegroundColor Green
     #Inheritence 
     $inherNone = [System.Security.AccessControl.InheritanceFlags]::None
     $propNone = [System.Security.AccessControl.PropagationFlags]::None
@@ -254,7 +278,8 @@ else
     #Enable MDT Monitoring
     Enable-MDTMonitorService -EventPort 9800 -DataPort 9801 
 
-    #Win10-PE Profiles created
+    #Win10PE_Drivers Profiles created
+    Write-Host "Creates Win10PE_Drivers Selection Profile" -ForegroundColor Green
     New-PSDrive -Name "DS002" -PSProvider MDTProvider -Root $mdtRoot
     New-Item -path "DS002:\Selection Profiles" -enable "True" -Name "Win10PE_Drivers" -Comments "Only add Network and Storage drivers to this profile" -Definition "<SelectionProfile />" -ReadOnly "False" -Verbose
 
@@ -262,7 +287,8 @@ else
     ############################  IMPORT WINDOWS 10 MEDIA  #####################################
     ############################################################################################
 
-    #Mount Windows ISO 
+    #Mount Windows ISO
+    Write-Host "Mounts Windows 10 ISO" -ForegroundColor Green
     Mount-DiskImage -ImagePath (Get-ChildItem C:\Media\Win10 -Filter *.iso).FullName
 
     $psISO = (psdrive | where {$_.Free -eq "0"}).Name[0]
@@ -271,6 +297,7 @@ else
     #New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root "$mdtRoot"
     New-Item -path "DS002:\Operating Systems" -enable "True" -Name "Windows 10" -Comments "" -ItemType "folder" -Verbose
 
+    Write-Host "Imports Windows 10 Media into MDT" -ForegroundColor Green
     #Import Windows 10 into MDT
     Import-MDTOperatingSystem -path "DS002:\Operating Systems\Windows 10" -SourceFile "$psISO`:\sources\install.wim" -DestinationFolder "Windows 10" -Verbose
 
@@ -282,22 +309,24 @@ else
 
     $tsID = "Win10-Gold-001"
 
+    Write-Host "Creates Task Sequence" -ForegroundColor Green
     if ($gcOSImage -match "Windows 10 Enterprise" )
         { 
         #New Task Sequence for Windows 10 Enterprise
-        Import-MDTTaskSequence -path "DS002:\Task Sequences\Windows 10 Gold Image" -Name "Windows 10 Enterprise Gold Image" -Template "Client.xml" -Comments "" -ID $tsID -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10\Windows 10 Enterprise in Windows 10 install.wim" -FullName "Windows User" -OrgName "Contoso" -HomePage "about:blank" -Verbose
+        Import-MDTTaskSequence -path "DS002:\Task Sequences\Windows 10 Gold Image" -Name "Windows 10 Enterprise Gold Image" -Template "Client.xml" -Comments "" -ID $tsID -Version "1.0" -OperatingSystemPath "DS002:\Operating Systems\Windows 10\Windows 10 Enterprise in Windows 10 install.wim" -FullName "Windows User" -OrgName "Contoso" -HomePage "about:blank" -Verbose
         }
     else
         { 
         #New Task Sequence for Windows 10 Pro
-        Import-MDTTaskSequence -path "DS002:\Task Sequences\Windows 10 Gold Image" -Name "Windows 10 Pro Gold Image" -Template "Client.xml" -Comments "" -ID $tsID -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10\Windows 10 Pro in Windows 10 install.wim" -FullName "Windows User" -OrgName "Contoso" -HomePage "about:blank" -Verbose
+        Import-MDTTaskSequence -path "DS002:\Task Sequences\Windows 10 Gold Image" -Name "Windows 10 Pro Gold Image" -Template "Client.xml" -Comments "" -ID $tsID -Version "1.0" -OperatingSystemPath "DS002:\Operating Systems\Windows 10\Windows 10 Pro in Windows 10 install.wim" -FullName "Windows User" -OrgName "Contoso" -HomePage "about:blank" -Verbose
         }
 
     ############################################################################################
     #########################  SET CUSTOMSETTINGS AND BOOTSTRAP  ###############################
     ############################################################################################
 
-    #Set custom settings 
+    #Set custom settings
+    Write-Host "Update CustomSettings.ini to drive deployment wizard at boot" -ForegroundColor Green 
     $cuSet = "$mdtRoot\Control\CustomSettings.ini"
 
     Set-Content -Path $cuSet -Value "[Settings]"
@@ -423,11 +452,11 @@ else
     ############################################################################################
     ############################  SET BOOT MEDIA SETTINGS ######################################
     ############################################################################################
-    
-   $mdtSetSrc = "C:\Program Files\Microsoft Deployment Toolkit\Templates\"
-   Copy-Item $mdtSetSrc\Settings.xml $mdtSetSrc\Settings-backup.xml -Force
+    Write-Host "Update the configuraton settings in the workbench" -ForegroundColor Green
+    $mdtSetSrc = "C:\Program Files\Microsoft Deployment Toolkit\Templates\"
+    Copy-Item $mdtSetSrc\Settings.xml $mdtSetSrc\Settings-backup.xml -Force
 
-   #UPDATE TEMPLATE SOURCE - Update template source Settings.xml or MDTRoot\Control\Settings.xml will revert 
+    #UPDATE TEMPLATE SOURCE - Update template source Settings.xml or MDTRoot\Control\Settings.xml will revert 
 
     #Update Settings.xml to set x64 boot media settings
     $gcSettings = Get-Content $mdtSetSrc\Settings.xml 
@@ -480,7 +509,8 @@ else
     ############################################################################################
     ########################  CREATE BOOT MEDIA, IMPORT AND INIT WDS  ##########################
     ############################################################################################
-
+    Write-Host "Generate boot image and initialize WDS" -ForegroundColor Green
+    Write-Host "This step takes a while to complete - Coffee time" -ForegroundColor Green
     #Generate boot media
     #New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root "$mdtRoot"
     Update-MDTDeploymentShare -path "DS002:" -Force -Verbose
@@ -495,7 +525,15 @@ else
     Start-Service WDSServer
 
     #Import WDS Boot image generated by MDT
+    Write-Host "Imports the MDT generated boot image into WDS" -ForegroundColor Green
     Import-WdsBootImage -NewImageName "Lite Touch Windows PE (x64)" -NewFileName "LiteTouchPE_x64.wim" -Path $mdtRoot\boot\LiteTouchPE_x64.wim 
+
+    Write-Host "" -ForegroundColor Green
+    Write-Host "Add addtional drivers as a selection profile, update Boot media and add to Task Sequence - if there is not native support for Windows 10" -ForegroundColor Red
+    Write-Host "" -ForegroundColor Green
+    Write-Host "" -ForegroundColor Green
+    Write-Host "FINISHED" -ForegroundColor Green
+
 
     ############################################################################################
     ######################################  THE END  ###########################################
