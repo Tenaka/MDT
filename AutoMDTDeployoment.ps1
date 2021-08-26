@@ -195,12 +195,12 @@ else
     #Paths and Shares
     Write-Host "Creates MDT Shares" -ForegroundColor Green
     if($drv -eq ":"){$drv = "c:"}
-    $mdtRoot = "$drv"+"\MDTDeploymentShare"
+    $mdtRoot = "$drv"+"\DeploymentShare"
     $mdtLogs = "$mdtRoot\logs"
-    $mdtCap = "$mdtRoot\captures"
+    $mdtCap = "$mdtRoot\Captures"
     $mdtDes = "MDT Deployment Share"
 
-    $mdtShRoot = "MDTDeploymentShare$"
+    $mdtShRoot = "DeploymentShare$"
     $mdtShLogs = "Logs$"
     $mdtShCap = "Captures$"
 
