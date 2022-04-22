@@ -36,6 +36,7 @@ the network adapter and mass storage devices, the deployment will fail. Follow M
 
 .VERSION
 210716.01 - created 
+220422.01 - Added Set-DnsClient -ConnectionSpecificSuffix $dnsName -InterfaceAlias $intAlias 
 
 
 #>
@@ -109,6 +110,7 @@ else
                      -DefaultGateway $DefGate
     #Set DNS Server                 
     Set-DnsClientServerAddress -ServerAddresses $dnsServer -InterfaceAlias $intAlias
+    Set-DnsClient -ConnectionSpecificSuffix $dnsName -InterfaceAlias $intAlias
 
     ############################################################################################
     ##########################  INSTALL WINDOWS FEATURES, MDT AND ADK  #########################
